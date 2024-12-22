@@ -9,6 +9,28 @@ import datetime
 from zipfile import ZipFile
 import io
 
+def combine_images(images):
+    """複数の画像を縦方向に連結する関数"""
+    # 全画像の幅と高さを取得
+    widths, heights = zip(*(i.size for i in images))
+    
+    # 最大幅と合計の高さを計算
+    max_width = max(widths)
+    total_height = sum(heights)
+    
+    # 新しい画像を作成
+    combined_image = Image.new('RGB', (max_width, total_height), 'white')
+    
+    # 画像を縦に連結
+    y_offset = 0
+    for img in images:
+        # 画像の幅が最大幅と異なる場合は、センタリング
+        x_offset = (max_width - img.size[0]) // 2
+        combined_image.paste(img, (x_offset, y_offset))
+        y_offset += img.size[1]
+    
+    return combined_image
+
 def highlight_differences(base_image, check_image, progress_bar=None, current_progress=0):
     """個別の画像ページの差分を検出する関数"""
     # 画像のリサイズ
@@ -57,9 +79,9 @@ def process_pdfs(base_pdf_path, check_pdf_path, progress_bar):
     check_images = convert_from_path(check_pdf_path, size=(2000, None), fmt='png')
     
     total_pages = min(len(base_images), len(check_images))
-    st.write(f"検出したページ数: {total_pages}")  # ← この行を追加
-    st.write(f"ベースPDFのページ数: {len(base_images)}")  # ← この行も追加
-    st.write(f"チェック対象PDFのページ数: {len(check_images)}")  # ← この行も追加
+    st.write(f"検出したページ数: {total_pages}")
+    st.write(f"ベースPDFのページ数: {len(base_images)}")
+    st.write(f"チェック対象PDFのページ数: {len(check_images)}")
     results = []
     
     # 各ページを処理
@@ -104,15 +126,21 @@ def main():
                 os.unlink(base_path)
                 os.unlink(check_path)
                 
-                # 結果の表示
+                # 結果の表示（単一画像として）
                 st.subheader("差分検出結果")
-                for i, img in enumerate(result_images):
-                    st.image(img, caption=f"ページ {i+1}", use_column_width=True)
+                combined_image = combine_images(result_images)
+                st.image(combined_image, caption="全ページの差分検出結果", use_column_width=True)
                 
-                # ZIPファイルの作成
+                # ZIPファイルの作成（個別ページと結合版の両方を含める）
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 zip_buffer = io.BytesIO()
                 with ZipFile(zip_buffer, 'w') as zip_file:
+                    # 結合版の保存
+                    combined_buffer = io.BytesIO()
+                    combined_image.save(combined_buffer, format='PNG')
+                    zip_file.writestr('diff_result_combined.png', combined_buffer.getvalue())
+                    
+                    # 個別ページの保存
                     for i, img in enumerate(result_images):
                         img_buffer = io.BytesIO()
                         img.save(img_buffer, format='PNG')
@@ -120,7 +148,7 @@ def main():
                 
                 # ダウンロードボタン
                 st.download_button(
-                    label="全ページをダウンロード (ZIP)",
+                    label="結果をダウンロード (ZIP)",
                     data=zip_buffer.getvalue(),
                     file_name=f"diff_results_{timestamp}.zip",
                     mime="application/zip"
