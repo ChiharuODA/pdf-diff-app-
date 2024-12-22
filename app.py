@@ -96,7 +96,7 @@ def process_pdfs(base_pdf_path, check_pdf_path, progress_bar):
     return results
 
 def main():
-    st.title("PDF差分比較ツール（複数ページ対応）")
+    st.title("PDF比較ツール（複数ページ対応）")
     
     # ファイルアップロード
     st.subheader("1. PDFファイルを選択してください")
