@@ -6,29 +6,18 @@ import numpy as np
 from pdf2image import convert_from_path
 import tempfile
 import datetime
-import time
+from zipfile import ZipFile
+import io
 
-def highlight_differences(base_pdf_path, check_pdf_path, output_path, progress_bar):
-    """PDFの差分を検出し、強調表示する関数（プログレスバー付き）"""
-    # PDFを画像に変換
-    progress_bar.progress(10, text="PDFを画像に変換中...")
-    base_images = convert_from_path(base_pdf_path, size=(2000, None), fmt='png')
-    check_images = convert_from_path(check_pdf_path, size=(2000, None), fmt='png')
-    
-    # 最初のページで処理
-    progress_bar.progress(20, text="画像処理の準備中...")
-    base_image = base_images[0]
-    check_image = check_images[0]
-    
+def highlight_differences(base_image, check_image, progress_bar=None, current_progress=0):
+    """個別の画像ページの差分を検出する関数"""
     # 画像のリサイズ
-    progress_bar.progress(30, text="画像をリサイズ中...")
     min_width = min(base_image.width, check_image.width)
     min_height = min(base_image.height, check_image.height)
     base_image_resized = base_image.resize((min_width, min_height), Image.LANCZOS)
     check_image_resized = check_image.resize((min_width, min_height), Image.LANCZOS)
     
     # グレースケール変換して差分検出
-    progress_bar.progress(50, text="差分を検出中...")
     base_gray = cv2.cvtColor(np.array(base_image_resized), cv2.COLOR_RGB2GRAY)
     check_gray = cv2.cvtColor(np.array(check_image_resized), cv2.COLOR_RGB2GRAY)
     
@@ -37,7 +26,6 @@ def highlight_differences(base_pdf_path, check_pdf_path, output_path, progress_b
     _, diff_mask = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
     
     # 画像処理
-    progress_bar.progress(70, text="差分を強調表示中...")
     base_rgba = base_image_resized.convert('RGBA')
     overlay = Image.new('RGBA', base_rgba.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -53,28 +41,42 @@ def highlight_differences(base_pdf_path, check_pdf_path, output_path, progress_b
                     if 0 <= new_x < width and 0 <= new_y < height:
                         draw.point((new_x, new_y), fill=(255, 165, 0, 60))
     
-    # 画像の合成と保存
-    progress_bar.progress(90, text="結果を保存中...")
+    # 画像の合成
     background = Image.new('RGBA', base_rgba.size, (255, 255, 255, 255))
     result = Image.alpha_composite(background, base_rgba)
     result = Image.alpha_composite(result, overlay)
     result = result.convert('RGB')
-    result.save(output_path, 'PNG', quality=95)
+    
+    return result
+
+def process_pdfs(base_pdf_path, check_pdf_path, progress_bar):
+    """全てのPDFページを処理する関数"""
+    # PDFを画像に変換
+    progress_bar.progress(10, text="PDFを画像に変換中...")
+    base_images = convert_from_path(base_pdf_path, size=(2000, None), fmt='png')
+    check_images = convert_from_path(check_pdf_path, size=(2000, None), fmt='png')
+    
+    total_pages = min(len(base_images), len(check_images))
+    results = []
+    
+    # 各ページを処理
+    for i in range(total_pages):
+        progress = int(10 + (80 * i / total_pages))
+        progress_bar.progress(progress, text=f"ページ {i+1}/{total_pages} を処理中...")
+        
+        result_image = highlight_differences(base_images[i], check_images[i])
+        results.append(result_image)
     
     progress_bar.progress(100, text="完了！")
-    return output_path
+    return results
 
 def main():
-    st.title("PDF差分比較ツール")
+    st.title("PDF差分比較ツール（複数ページ対応）")
     
     # ファイルアップロード
     st.subheader("1. PDFファイルを選択してください")
     base_file = st.file_uploader("ベースPDFファイル", type=['pdf'])
     check_file = st.file_uploader("チェック対象PDFファイル", type=['pdf'])
-    
-    # 出力先の選択（固定のディレクトリを用意）
-    output_dir = "temp_outputs"
-    os.makedirs(output_dir, exist_ok=True)
 
     if st.button("差分を検出"):
         if base_file and check_file:
@@ -92,33 +94,36 @@ def main():
                     tmp_check.write(check_file.getvalue())
                     check_path = tmp_check.name
                 
-                # タイムスタンプを含む出力ファイル名の生成
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_filename = f"diff_result_{timestamp}.png"
-                output_path = os.path.join(output_dir, output_filename)
-                
-                # 差分検出実行（プログレスバーを渡す）
-                result_path = highlight_differences(base_path, check_path, output_path, progress_bar)
+                # 差分検出実行
+                result_images = process_pdfs(base_path, check_path, progress_bar)
                 
                 # 一時ファイルの削除
                 os.unlink(base_path)
                 os.unlink(check_path)
                 
                 # 結果の表示
-                with st.spinner("結果を表示中..."):
-                    result_image = Image.open(output_path)
-                    st.image(result_image, caption="差分検出結果", use_column_width=True)
-                    
-                    # ダウンロードボタンの表示
-                    with open(output_path, "rb") as file:
-                        st.download_button(
-                            label="結果をダウンロード",
-                            data=file,
-                            file_name=output_filename,
-                            mime="image/png"
-                        )
+                st.subheader("差分検出結果")
+                for i, img in enumerate(result_images):
+                    st.image(img, caption=f"ページ {i+1}", use_column_width=True)
                 
-                st.success("処理が完了しました！")
+                # ZIPファイルの作成
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                zip_buffer = io.BytesIO()
+                with ZipFile(zip_buffer, 'w') as zip_file:
+                    for i, img in enumerate(result_images):
+                        img_buffer = io.BytesIO()
+                        img.save(img_buffer, format='PNG')
+                        zip_file.writestr(f'diff_result_page_{i+1}.png', img_buffer.getvalue())
+                
+                # ダウンロードボタン
+                st.download_button(
+                    label="全ページをダウンロード (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name=f"diff_results_{timestamp}.zip",
+                    mime="application/zip"
+                )
+                
+                st.success(f"処理が完了しました！全 {len(result_images)} ページの処理が終了しました。")
                 
             except Exception as e:
                 st.error(f"エラーが発生しました: {str(e)}")
