@@ -79,7 +79,7 @@ def process_pdfs(base_pdf_path, check_pdf_path, progress_bar):
     check_images = convert_from_path(check_pdf_path, size=(2000, None), fmt='png')
     
     total_pages = min(len(base_images), len(check_images))
-    st.write(f"検出したページ数: {total_pages}")
+    # st.write(f"検出したページ数: {total_pages}")
     st.write(f"ベースPDFのページ数: {len(base_images)}")
     st.write(f"チェック対象PDFのページ数: {len(check_images)}")
     results = []
