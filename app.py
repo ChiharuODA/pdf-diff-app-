@@ -75,8 +75,8 @@ def process_pdfs(base_pdf_path, check_pdf_path, progress_bar):
     """全てのPDFページを処理する関数"""
     # PDFを画像に変換
     progress_bar.progress(10, text="PDFを画像に変換中...")
-    base_images = convert_from_path(base_pdf_path, size=(2000, None), fmt='png')
-    check_images = convert_from_path(check_pdf_path, size=(2000, None), fmt='png')
+    base_images = convert_from_path(base_pdf_path, size=(3000, None), dpi=300, fmt='png')
+    check_images = convert_from_path(check_pdf_path, size=(3000, None), dpi=300, fmt='png')
     
     total_pages = min(len(base_images), len(check_images))
     # st.write(f"検出したページ数: {total_pages}")
