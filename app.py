@@ -8,6 +8,8 @@ import tempfile
 import datetime
 from zipfile import ZipFile
 import io
+import platform
+import sys
 
 def combine_images(images):
     """複数の画像を縦方向に連結する関数"""
@@ -71,15 +73,47 @@ def highlight_differences(base_image, check_image, progress_bar=None, current_pr
     
     return result
 
+def set_poppler_path():
+    """環境に応じてPoppler pathを設定する"""
+    os_name = platform.system()
+    if os_name == "Windows":
+        # WindowsではPopplerのパスを設定する必要がある
+        # 注: ユーザーはこのパスを適切に変更する必要があります
+        return r"C:\Program Files\poppler-23.11.0\Library\bin"
+    return None  # Linux/Macではパスの設定は不要
+
 def process_pdfs(base_pdf_path, check_pdf_path, progress_bar):
     """全てのPDFページを処理する関数"""
+    # PDFを画像に変換するためのオプション
+    poppler_path = set_poppler_path()
+    conversion_options = {
+        'size': (4000, None),  # 高解像度に設定
+        'fmt': 'png',
+        'grayscale': False,    # カラーで処理
+        'transparent': False,
+        'jpegopt': {'quality': 100, 'progressive': True, 'optimize': True},
+        'use_cropbox': True,   # PDFのcropboxを使用
+        'strict': False,       # エラーが出てもできるだけ続行
+        'first_page': 1        # 最初のページから
+    }
+    
+    # Windowsの場合はpoppler_pathを追加
+    if poppler_path:
+        conversion_options['poppler_path'] = poppler_path
+    
     # PDFを画像に変換
     progress_bar.progress(10, text="PDFを画像に変換中...")
-    base_images = convert_from_path(base_pdf_path, size=(3000, None), dpi=300, fmt='png')
-    check_images = convert_from_path(check_pdf_path, size=(3000, None), dpi=300, fmt='png')
+    
+    try:
+        base_images = convert_from_path(base_pdf_path, **conversion_options)
+        check_images = convert_from_path(check_pdf_path, **conversion_options)
+    except Exception as e:
+        st.error(f"PDF変換エラー: {str(e)}")
+        if "fontAnnouncementsWithoutNames" in str(e):
+            st.warning("フォント関連のエラーが発生しました。Popplerのインストールを確認してください。")
+        return []
     
     total_pages = min(len(base_images), len(check_images))
-    # st.write(f"検出したページ数: {total_pages}")
     st.write(f"ベースPDFのページ数: {len(base_images)}")
     st.write(f"チェック対象PDFのページ数: {len(check_images)}")
     results = []
@@ -98,11 +132,22 @@ def process_pdfs(base_pdf_path, check_pdf_path, progress_bar):
 def main():
     st.title("PDF比較ツール(複数ページ対応)")
     
+    # PDFフォント問題の通知
+    st.info("""
+    注意: 日本語フォントが□（豆腐）になる場合は、PDFにフォントが正しく埋め込まれていない可能性があります。
+    このツールは画像として処理するため、テキスト情報は保持されません。
+    """)
+    
     # ファイルアップロード
     st.subheader("1. PDFファイルを選択してください")
     base_file = st.file_uploader("ベースPDFファイル", type=['pdf'])
     check_file = st.file_uploader("チェック対象PDFファイル", type=['pdf'])
 
+    # 高度な設定（折りたたみメニュー）
+    with st.expander("高度な設定"):
+        st.write("PDFの解像度と処理方法の設定")
+        use_high_res = st.checkbox("高解像度モード（処理が遅くなりますが、文字の品質が向上します）", value=True)
+    
     if st.button("差分を検出"):
         if base_file and check_file:
             try:
@@ -125,6 +170,10 @@ def main():
                 # 一時ファイルの削除
                 os.unlink(base_path)
                 os.unlink(check_path)
+                
+                if not result_images:
+                    st.error("処理中にエラーが発生しました。")
+                    return
                 
                 # 結果の表示（単一画像として）
                 st.subheader("差分検出結果")
@@ -158,6 +207,7 @@ def main():
                 
             except Exception as e:
                 st.error(f"エラーが発生しました: {str(e)}")
+                st.write("エラーの詳細:", sys.exc_info())
         else:
             st.warning("PDFファイルを両方アップロードしてください。")
 
